@@ -39,3 +39,11 @@ Mantenha também uma cópia privada do arquivo `.jks` e das credenciais fora do 
 6. só então permite Artifact/Release estável.
 
 Se o fingerprint for diferente, o workflow falha antes da publicação. Nunca altere o fingerprint para fazer uma chave diferente "passar" na validação.
+
+## Disparo da Release
+
+O workflow mantém `workflow_dispatch` para publicação manual. Para permitir que o agente conclua a distribuição sem depender do botão da interface do GitHub, um push em `main` também pode solicitar publicação quando a mensagem do commit contiver exatamente o marcador `[release]`.
+
+Esse marcador **não ignora nenhuma proteção**: se os Secrets estiverem ausentes, o job falha; se o fingerprint, `applicationId`, `versionCode` ou `versionName` não corresponderem ao esperado, a Release não é criada.
+
+O fluxo recomendado continua sendo: branch de release → testes/PR → merge em `main` com `[release]` → assinatura e verificação → GitHub Release.
