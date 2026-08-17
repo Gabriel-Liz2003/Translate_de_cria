@@ -42,8 +42,8 @@ Se o fingerprint for diferente, o workflow falha antes da publicação. Nunca al
 
 ## Disparo da Release
 
-O workflow mantém `workflow_dispatch` para publicação manual. Para permitir que o agente conclua a distribuição sem depender do botão da interface do GitHub, um push em `main` também pode solicitar publicação quando a mensagem do commit contiver exatamente o marcador `[release]`.
+O workflow mantém `workflow_dispatch` para publicação manual. Para permitir que o agente conclua a distribuição sem depender do botão da interface do GitHub, um push em `main` também pode solicitar publicação **somente quando a mensagem do commit começar com `release:`**.
 
-Esse marcador **não ignora nenhuma proteção**: se os Secrets estiverem ausentes, o job falha; se o fingerprint, `applicationId`, `versionCode` ou `versionName` não corresponderem ao esperado, a Release não é criada.
+Essa regra evita disparos acidentais por comentários, documentação ou mensagens que apenas mencionem a palavra release. O prefixo `release:` **não ignora nenhuma proteção**: se os Secrets estiverem ausentes, o job falha; se o fingerprint, `applicationId`, `versionCode` ou `versionName` não corresponderem ao esperado, a Release não é criada.
 
-O fluxo recomendado continua sendo: branch de release → testes/PR → merge em `main` com `[release]` → assinatura e verificação → GitHub Release.
+O fluxo recomendado continua sendo: branch de release → testes/PR → merge em `main` com título começando por `release:` → assinatura e verificação → GitHub Release.
