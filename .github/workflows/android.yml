@@ -105,10 +105,13 @@ jobs:
           done
           echo "Packaged APK privacy audit passed: no network, camera, microphone or storage/media permissions."
 
+      - name: Prepare test APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk Translate-de-Cria-v0.1.0-debug.apk
+
       - uses: actions/upload-artifact@v4
         with:
-          name: Translate-de-Cria-debug-test-build
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Translate-de-Cria-v0.1.0-debug
+          path: Translate-de-Cria-v0.1.0-debug.apk
           if-no-files-found: error
           retention-days: 14
 
