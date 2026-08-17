@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Translate de Cria</string>
+    <string name="accessibility_service_name">Translate de Cria — Privacidade máxima</string>
+    <string name="accessibility_description">Lê somente textos que outros apps expõem pela árvore de acessibilidade e os traduz localmente. Não captura a tela neste modo.</string>
+    <string name="notification_channel_name">Tradução OCR em execução</string>
+    <string name="notification_title">Translate de Cria ativo</string>
+    <string name="notification_text">OCR local da tela em RAM. Toque para abrir as configurações.</string>
+</resources>
