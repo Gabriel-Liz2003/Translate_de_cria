@@ -102,7 +102,7 @@ class TranslatorAccessibilityService : AccessibilityService() {
     }
 
     private fun ensureSessionObjects() {
-        if (translationEngine == null) translationEngine = TranslationEngine()
+        if (translationEngine == null) translationEngine = TranslationEngine(this)
         if (overlayController == null) {
             overlayController = OverlayController(
                 context = this,
