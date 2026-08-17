@@ -4,6 +4,7 @@ local.properties
 *.iml
 build/
 app/build/
+app/src/main/assets/tessdata/*.traineddata
 *.jks
 *.keystore
 keystore.properties
