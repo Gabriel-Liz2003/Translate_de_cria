@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -107,7 +107,7 @@ jobs:
         if: ${{ env.KEYSTORE_B64 == '' }}
         run: echo "Skipping signed build until the persistent signing key is stored in GitHub Secrets."
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         if: ${{ env.KEYSTORE_B64 != '' }}
         with:
           distribution: temurin
