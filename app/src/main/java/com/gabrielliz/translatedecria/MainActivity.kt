@@ -2,6 +2,7 @@ package com.gabrielliz.translatedecria
 
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Activity
+import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -43,26 +44,28 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.gabrielliz.translatedecria.accessibility.TranslatorAccessibilityService
 import com.gabrielliz.translatedecria.model.CaptureMode
 import com.gabrielliz.translatedecria.model.SettingsSnapshot
 import com.gabrielliz.translatedecria.model.SourceLanguage
 import com.gabrielliz.translatedecria.model.TargetLanguage
 import com.gabrielliz.translatedecria.ocr.ScreenOcrService
-import com.gabrielliz.translatedecria.translation.OfflineModelManager
+import com.gabrielliz.translatedecria.translation.SystemTranslationSupport
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var settingsStore: AppSettingsStore
+    private lateinit var translationSupport: SystemTranslationSupport
     private var settings by mutableStateOf(SettingsSnapshot())
     private var accessibilityEnabled by mutableStateOf(false)
     private var overlayPermission by mutableStateOf(false)
     private var statusMessage by mutableStateOf("Pronto")
+    private var translationModelsMessage by mutableStateOf("Verificando tradução on-device…")
     private var showOcrPrivacyDialog by mutableStateOf(false)
 
     private val projectionLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -85,8 +88,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settingsStore = AppSettingsStore(this)
+        translationSupport = SystemTranslationSupport(this)
         settings = settingsStore.load()
         refreshPermissionState()
+        refreshTranslationSupport()
 
         setContent {
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
@@ -99,14 +104,12 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         refreshPermissionState()
         settings = settingsStore.load()
+        if (::translationSupport.isInitialized) refreshTranslationSupport()
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun MainScreen() {
-        val scope = rememberCoroutineScope()
-        var modelDownloadState by remember { mutableStateOf<String?>(null) }
-
         Scaffold(
             topBar = { TopAppBar(title = { Text("Translate de Cria") }) }
         ) { paddingValues ->
@@ -123,10 +126,10 @@ class MainActivity : ComponentActivity() {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Privacidade primeiro", fontWeight = FontWeight.Bold)
                             Text(
-                                "Accessibility não captura a tela. No modo OCR, frames existem apenas em RAM durante o processamento local; não há screenshots, vídeo, armazenamento, analytics ou envio do conteúdo da tela."
+                                "Accessibility não captura a tela. No OCR, frames existem somente em RAM durante o processamento local e são descartados em seguida."
                             )
                             Text(
-                                "Conteúdo protegido por FLAG_SECURE pode aparecer em branco e não será contornado.",
+                                "O app não possui permissão de internet, câmera, microfone ou armazenamento; não inclui analytics nem telemetria e não tenta contornar FLAG_SECURE.",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
@@ -148,7 +151,7 @@ class MainActivity : ComponentActivity() {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Permissões e serviços", fontWeight = FontWeight.Bold)
                             StatusRow("Accessibility", accessibilityEnabled)
-                            StatusRow("Sobrepor outros apps (necessário no OCR)", overlayPermission)
+                            StatusRow("Sobrepor outros apps (OCR)", overlayPermission)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { openAccessibilitySettings() }) { Text("Accessibility") }
                                 Button(onClick = { openOverlaySettings() }) { Text("Overlay") }
@@ -160,26 +163,16 @@ class MainActivity : ComponentActivity() {
                 item {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Modelos offline", fontWeight = FontWeight.Bold)
-                            Text("OCR e identificação de idioma já vêm no APK. Baixe uma vez os modelos EN/JA/ZH/KO → PT para traduzir depois sem internet.")
-                            Button(
-                                enabled = modelDownloadState?.startsWith("Baixando") != true,
-                                onClick = {
-                                    modelDownloadState = "Baixando 0/4…"
-                                    scope.launch {
-                                        runCatching {
-                                            OfflineModelManager.downloadEssentials { completed, total ->
-                                                modelDownloadState = "Baixando $completed/$total…"
-                                            }
-                                        }.onSuccess {
-                                            modelDownloadState = "Modelos essenciais disponíveis offline."
-                                        }.onFailure {
-                                            modelDownloadState = "Falha no download. Verifique a internet e tente novamente."
-                                        }
-                                    }
-                                }
-                            ) { Text("Baixar modelos essenciais") }
-                            modelDownloadState?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                            Text("Processamento local", fontWeight = FontWeight.Bold)
+                            Text("Os modelos OCR EN/JA/ZH/KO são embutidos no APK e copiados somente para o armazenamento privado do próprio app.")
+                            Text(translationModelsMessage, style = MaterialTheme.typography.bodySmall)
+                            Button(onClick = { openSystemTranslationSettings() }) {
+                                Text("Configurações de tradução do Android")
+                            }
+                            Text(
+                                "Se o aparelho ainda não tiver um modelo de tradução, o download é gerenciado pelo serviço de tradução do sistema. O Translate de Cria continua sem permissão de rede.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
                         }
                     }
                 }
@@ -211,7 +204,7 @@ class MainActivity : ComponentActivity() {
                 title = { Text("OCR da tela: consentimento e privacidade") },
                 text = {
                     Text(
-                        "O Android pedirá autorização para uma sessão de MediaProjection. Frames serão copiados temporariamente para RAM, processados localmente pelo ML Kit e descartados imediatamente. Nenhuma imagem, vídeo ou texto reconhecido é salvo ou enviado. Ao encerrar a sessão, ImageReader, VirtualDisplay, MediaProjection, bitmaps, cache e overlays são liberados."
+                        "O Android pedirá autorização para uma sessão de MediaProjection. Cada frame é copiado temporariamente para RAM, lido pelo Tesseract local e descartado. Nenhuma imagem, vídeo ou texto reconhecido é salvo ou enviado. Ao encerrar, ImageReader, VirtualDisplay, MediaProjection, bitmaps, resultados nativos do OCR, cache e overlays são liberados."
                     )
                 },
                 confirmButton = {
@@ -279,7 +272,7 @@ class MainActivity : ComponentActivity() {
 
                 if (settings.sourceLanguage == SourceLanguage.AUTO && settings.captureMode == CaptureMode.OCR) {
                     Text(
-                        "Automático no OCR consulta os quatro reconhecedores locais quando a imagem muda. Selecionar o idioma manualmente reduz CPU e bateria.",
+                        "Automático carrega EN + JA + ZH + KO no mesmo OCR. Fixar o idioma normalmente reduz RAM e CPU.",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -379,6 +372,23 @@ class MainActivity : ComponentActivity() {
                 Uri.parse("package:$packageName")
             )
         )
+    }
+
+    private fun openSystemTranslationSettings() {
+        val intent = translationSupport.settingsIntent()
+        if (intent == null) {
+            statusMessage = "O fabricante não disponibilizou uma tela de configurações do serviço de tradução."
+            return
+        }
+        runCatching { intent.send() }
+            .onFailure { statusMessage = "Não foi possível abrir as configurações de tradução do sistema." }
+    }
+
+    private fun refreshTranslationSupport() {
+        lifecycleScope.launch {
+            translationModelsMessage = runCatching { translationSupport.query().userMessage }
+                .getOrElse { "Não foi possível consultar o serviço de tradução on-device deste aparelho." }
+        }
     }
 
     private fun refreshPermissionState() {
