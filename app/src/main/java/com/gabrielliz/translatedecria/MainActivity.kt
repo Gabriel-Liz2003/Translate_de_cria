@@ -155,8 +155,8 @@ class MainActivity : ComponentActivity() {
                 }
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(Modifier.fillMaxWidth(), onClick = ::activateTranslation) { Text("Ativar tradução") }
-                        TextButton(Modifier.fillMaxWidth(), onClick = ::stopTranslation) { Text("Encerrar tradução e limpar cache em memória") }
+                        Button(onClick = ::activateTranslation, modifier = Modifier.fillMaxWidth()) { Text("Ativar tradução") }
+                        TextButton(onClick = ::stopTranslation, modifier = Modifier.fillMaxWidth()) { Text("Encerrar tradução e limpar cache em memória") }
                         Text(statusMessage, style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(24.dp))
                     }
