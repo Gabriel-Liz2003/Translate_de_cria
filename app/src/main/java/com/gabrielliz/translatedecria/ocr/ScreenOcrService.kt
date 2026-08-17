@@ -107,7 +107,10 @@ class ScreenOcrService : Service() {
 
     private fun startProjection(resultCode: Int, data: Intent) {
         val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        val projection = manager.getMediaProjection(resultCode, data)
+        val projection = manager.getMediaProjection(resultCode, data) ?: run {
+            stopSelf()
+            return
+        }
         mediaProjection = projection
         projection.registerCallback(object : MediaProjection.Callback() {
             override fun onStop() {
@@ -115,9 +118,7 @@ class ScreenOcrService : Service() {
             }
 
             override fun onCapturedContentResize(width: Int, height: Int) {
-                if (width > 0 && height > 0) {
-                    workerHandler.post { resizeCapture(width, height) }
-                }
+                if (width > 0 && height > 0) workerHandler.post { resizeCapture(width, height) }
             }
         }, workerHandler)
 
@@ -170,7 +171,6 @@ class ScreenOcrService : Service() {
         val reader = ImageReader.newInstance(safeWidth, safeHeight, PixelFormat.RGBA_8888, 2)
         reader.setOnImageAvailableListener({ source -> onImageAvailable(source) }, workerHandler)
         imageReader = reader
-
         virtualDisplay = mediaProjection?.createVirtualDisplay(
             "TranslateDeCriaScreen",
             safeWidth,
@@ -215,7 +215,7 @@ class ScreenOcrService : Service() {
 
         val excludedOverlayBounds = buildList {
             addAll(overlayController?.translationBoundsSnapshot().orEmpty())
-            overlayController?.controlBoundsSnapshot()?.let(::add)
+            overlayController?.controlBoundsSnapshot()?.let { add(it) }
         }
 
         scope.launch {
@@ -223,7 +223,6 @@ class ScreenOcrService : Service() {
                 val recognized = ocrEngine?.recognize(bitmap, settings.sourceLanguage).orEmpty()
                 val blocks = recognized.filterNot { block -> isOwnOverlay(block.bounds, excludedOverlayBounds) }
                 if (!bitmap.isRecycled) bitmap.recycle()
-
                 val translated = translationEngine?.translateBlocks(
                     blocks,
                     settings.sourceLanguage,
@@ -233,7 +232,7 @@ class ScreenOcrService : Service() {
                     mainHandler.post { overlayController?.showTranslations(translated, settings) }
                 }
             } catch (_: Throwable) {
-                // Intentionally no captured text, image or exception payload is logged.
+                // Captured text, pixels and exception payloads are intentionally never logged.
             } finally {
                 if (!bitmap.isRecycled) bitmap.recycle()
                 processing.set(false)
@@ -268,6 +267,7 @@ class ScreenOcrService : Service() {
     }
 
     private fun resizeCapture(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
         val display = virtualDisplay ?: return
         val oldReader = imageReader
         val newReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
