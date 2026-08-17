@@ -1,54 +1,68 @@
 package com.gabrielliz.translatedecria.ocr
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Rect
 import com.gabrielliz.translatedecria.model.ScreenTextBlock
 import com.gabrielliz.translatedecria.model.SourceLanguage
-import com.gabrielliz.translatedecria.util.awaitResult
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.Text
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.TextRecognizer
-import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
-import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
-import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.gabrielliz.translatedecria.translation.LanguageHeuristics
+import com.googlecode.tesseract.android.TessBaseAPI
 import java.io.Closeable
 
-class OcrEngine : Closeable {
-    private val latin = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-    private val japanese = TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
-    private val chinese = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
-    private val korean = TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
+class OcrEngine(context: Context) : Closeable {
+    private val dataRoot = TessDataInstaller.ensureInstalled(context.applicationContext)
+    private val tess = TessBaseAPI()
+    private var initializedLanguageSpec: String? = null
 
     suspend fun recognize(bitmap: Bitmap, sourceLanguage: SourceLanguage): List<ScreenTextBlock> {
-        val image = InputImage.fromBitmap(bitmap, 0)
-        val candidates = when (sourceLanguage) {
-            SourceLanguage.ENGLISH -> listOf(latin to "en")
-            SourceLanguage.JAPANESE -> listOf(japanese to "ja")
-            SourceLanguage.CHINESE -> listOf(chinese to "zh")
-            SourceLanguage.KOREAN -> listOf(korean to "ko")
-            SourceLanguage.AUTO -> listOf(
-                latin to null,
-                japanese to null,
-                chinese to null,
-                korean to null
-            )
-        }
+        val languageSpec = languageSpec(sourceLanguage)
+        ensureInitialized(languageSpec)
 
-        val allBlocks = mutableListOf<ScreenTextBlock>()
-        for ((recognizer, hint) in candidates) {
-            val result = recognizer.process(image).awaitResult()
-            allBlocks += result.textBlocks.mapNotNull { it.toDomainBlock(hint) }
+        return try {
+            tess.setImage(bitmap)
+            // Recognition is triggered here. No recognized text is persisted or logged.
+            tess.getUTF8Text()
+            extractTextLines(sourceLanguage)
+        } finally {
+            // Drops Tesseract recognition results and its native copy of the current image.
+            tess.clear()
         }
-        return deduplicate(allBlocks)
     }
 
-    private fun Text.TextBlock.toDomainBlock(languageHint: String?): ScreenTextBlock? {
-        val box = boundingBox ?: return null
-        val clean = text.trim()
-        if (clean.length < 2 || box.width() < 4 || box.height() < 4) return null
-        return ScreenTextBlock(clean, Rect(box), languageHint)
+    private fun ensureInitialized(languageSpec: String) {
+        if (initializedLanguageSpec == languageSpec) return
+        check(tess.init(dataRoot.absolutePath, languageSpec)) {
+            "Could not initialize local OCR for $languageSpec"
+        }
+        tess.setPageSegMode(TessBaseAPI.PageSegMode.PSM_SPARSE_TEXT)
+        tess.setDebug(false)
+        initializedLanguageSpec = languageSpec
+    }
+
+    private fun extractTextLines(sourceLanguage: SourceLanguage): List<ScreenTextBlock> {
+        val iterator = tess.resultIterator ?: return emptyList()
+        val level = TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE
+        val blocks = mutableListOf<ScreenTextBlock>()
+
+        try {
+            iterator.begin()
+            while (true) {
+                val text = iterator.getUTF8Text(level)?.trim().orEmpty()
+                val confidence = iterator.confidence(level)
+                val bounds = runCatching { iterator.getBoundingRect(level) }.getOrNull()
+
+                if (text.length >= 2 && confidence >= MIN_CONFIDENCE && bounds != null && isUsable(bounds)) {
+                    val hint = sourceLanguage.languageTag ?: LanguageHeuristics.detect(text)
+                    blocks += ScreenTextBlock(text, Rect(bounds), hint)
+                }
+
+                if (!iterator.next(level)) break
+            }
+        } finally {
+            iterator.delete()
+        }
+
+        return deduplicate(blocks)
     }
 
     private fun deduplicate(blocks: List<ScreenTextBlock>): List<ScreenTextBlock> {
@@ -63,6 +77,16 @@ class OcrEngine : Closeable {
         return output.sortedWith(compareBy({ it.bounds.top }, { it.bounds.left }))
     }
 
+    private fun languageSpec(sourceLanguage: SourceLanguage): String = when (sourceLanguage) {
+        SourceLanguage.AUTO -> "eng+jpn+chi_sim+kor"
+        SourceLanguage.ENGLISH -> "eng"
+        SourceLanguage.JAPANESE -> "jpn"
+        SourceLanguage.CHINESE -> "chi_sim"
+        SourceLanguage.KOREAN -> "kor"
+    }
+
+    private fun isUsable(bounds: Rect): Boolean = bounds.width() >= 4 && bounds.height() >= 4
+
     private fun normalize(text: String): String = text.lowercase().replace(Regex("\\s+"), " ").trim()
 
     private fun intersectionOverUnion(a: Rect, b: Rect): Float {
@@ -74,9 +98,11 @@ class OcrEngine : Closeable {
     }
 
     override fun close() {
-        latin.close()
-        japanese.close()
-        chinese.close()
-        korean.close()
+        tess.recycle()
+        initializedLanguageSpec = null
+    }
+
+    private companion object {
+        const val MIN_CONFIDENCE = 35f
     }
 }
