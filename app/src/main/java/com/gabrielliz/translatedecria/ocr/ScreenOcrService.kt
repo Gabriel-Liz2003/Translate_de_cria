@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.Image
@@ -212,10 +213,17 @@ class ScreenOcrService : Service() {
         forceRefresh = false
         processing.set(true)
 
+        val excludedOverlayBounds = buildList {
+            addAll(overlayController?.translationBoundsSnapshot().orEmpty())
+            overlayController?.controlBoundsSnapshot()?.let(::add)
+        }
+
         scope.launch {
             try {
-                val blocks = ocrEngine?.recognize(bitmap, settings.sourceLanguage).orEmpty()
+                val recognized = ocrEngine?.recognize(bitmap, settings.sourceLanguage).orEmpty()
+                val blocks = recognized.filterNot { block -> isOwnOverlay(block.bounds, excludedOverlayBounds) }
                 if (!bitmap.isRecycled) bitmap.recycle()
+
                 val translated = translationEngine?.translateBlocks(
                     blocks,
                     settings.sourceLanguage,
@@ -231,6 +239,12 @@ class ScreenOcrService : Service() {
                 processing.set(false)
             }
         }
+    }
+
+    private fun isOwnOverlay(bounds: Rect, excluded: List<Rect>): Boolean {
+        val centerX = bounds.centerX()
+        val centerY = bounds.centerY()
+        return excluded.any { it.contains(centerX, centerY) }
     }
 
     private fun copyImageToBitmap(image: Image): Bitmap? {
