@@ -2,7 +2,6 @@ package com.gabrielliz.translatedecria
 
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Activity
-import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -23,7 +22,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -92,7 +90,6 @@ class MainActivity : ComponentActivity() {
         settings = settingsStore.load()
         refreshPermissionState()
         refreshTranslationSupport()
-
         setContent {
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
                 MainScreen()
@@ -110,14 +107,9 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun MainScreen() {
-        Scaffold(
-            topBar = { TopAppBar(title = { Text("Translate de Cria") }) }
-        ) { paddingValues ->
+        Scaffold(topBar = { TopAppBar(title = { Text("Translate de Cria") }) }) { paddingValues ->
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .padding(horizontal = 16.dp),
+                modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
@@ -125,9 +117,7 @@ class MainActivity : ComponentActivity() {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Privacidade primeiro", fontWeight = FontWeight.Bold)
-                            Text(
-                                "Accessibility não captura a tela. No OCR, frames existem somente em RAM durante o processamento local e são descartados em seguida."
-                            )
+                            Text("Accessibility não captura a tela. No OCR, frames existem somente em RAM durante o processamento local e são descartados em seguida.")
                             Text(
                                 "O app não possui permissão de internet, câmera, microfone ou armazenamento; não inclui analytics nem telemetria e não tenta contornar FLAG_SECURE.",
                                 style = MaterialTheme.typography.bodySmall
@@ -135,17 +125,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-
-                item {
-                    SettingsCard(
-                        settings = settings,
-                        onChange = { updated ->
-                            settings = updated
-                            settingsStore.save(updated)
-                        }
-                    )
-                }
-
+                item { SettingsCard(settings) { updated -> settings = updated; settingsStore.save(updated) } }
                 item {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -153,44 +133,30 @@ class MainActivity : ComponentActivity() {
                             StatusRow("Accessibility", accessibilityEnabled)
                             StatusRow("Sobrepor outros apps (OCR)", overlayPermission)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { openAccessibilitySettings() }) { Text("Accessibility") }
-                                Button(onClick = { openOverlaySettings() }) { Text("Overlay") }
+                                Button(onClick = ::openAccessibilitySettings) { Text("Accessibility") }
+                                Button(onClick = ::openOverlaySettings) { Text("Overlay") }
                             }
                         }
                     }
                 }
-
                 item {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Processamento local", fontWeight = FontWeight.Bold)
                             Text("Os modelos OCR EN/JA/ZH/KO são embutidos no APK e copiados somente para o armazenamento privado do próprio app.")
                             Text(translationModelsMessage, style = MaterialTheme.typography.bodySmall)
-                            Button(onClick = { openSystemTranslationSettings() }) {
-                                Text("Configurações de tradução do Android")
-                            }
+                            Button(onClick = ::openSystemTranslationSettings) { Text("Configurações de tradução do Android") }
                             Text(
-                                "Se o aparelho ainda não tiver um modelo de tradução, o download é gerenciado pelo serviço de tradução do sistema. O Translate de Cria continua sem permissão de rede.",
+                                "Se faltar um modelo de tradução, o download é gerenciado pelo serviço do sistema. O Translate de Cria continua sem permissão de rede.",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
                     }
                 }
-
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = { activateTranslation() }
-                        ) {
-                            Text("Ativar tradução")
-                        }
-                        TextButton(
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = { stopTranslation() }
-                        ) {
-                            Text("Encerrar tradução e limpar cache em memória")
-                        }
+                        Button(Modifier.fillMaxWidth(), onClick = ::activateTranslation) { Text("Ativar tradução") }
+                        TextButton(Modifier.fillMaxWidth(), onClick = ::stopTranslation) { Text("Encerrar tradução e limpar cache em memória") }
                         Text(statusMessage, style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(24.dp))
                     }
@@ -202,79 +168,36 @@ class MainActivity : ComponentActivity() {
             AlertDialog(
                 onDismissRequest = { showOcrPrivacyDialog = false },
                 title = { Text("OCR da tela: consentimento e privacidade") },
-                text = {
-                    Text(
-                        "O Android pedirá autorização para uma sessão de MediaProjection. Cada frame é copiado temporariamente para RAM, lido pelo Tesseract local e descartado. Nenhuma imagem, vídeo ou texto reconhecido é salvo ou enviado. Ao encerrar, ImageReader, VirtualDisplay, MediaProjection, bitmaps, resultados nativos do OCR, cache e overlays são liberados."
-                    )
-                },
-                confirmButton = {
-                    Button(onClick = {
-                        showOcrPrivacyDialog = false
-                        requestProjection()
-                    }) { Text("Continuar") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showOcrPrivacyDialog = false }) { Text("Cancelar") }
-                }
+                text = { Text("O Android pedirá autorização para uma sessão de MediaProjection. Cada frame é copiado temporariamente para RAM, lido pelo Tesseract local e descartado. Nenhuma imagem, vídeo ou texto reconhecido é salvo ou enviado. Ao encerrar, todos os recursos, bitmaps, resultados nativos do OCR, cache e overlays são liberados.") },
+                confirmButton = { Button(onClick = { showOcrPrivacyDialog = false; requestProjection() }) { Text("Continuar") } },
+                dismissButton = { TextButton(onClick = { showOcrPrivacyDialog = false }) { Text("Cancelar") } }
             )
         }
     }
 
     @Composable
-    private fun SettingsCard(settings: SettingsSnapshot, onChange: (SettingsSnapshot) -> Unit) {
+    private fun SettingsCard(current: SettingsSnapshot, onChange: (SettingsSnapshot) -> Unit) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Configurações", fontWeight = FontWeight.Bold)
-
-                DropdownSetting("Idioma de origem", settings.sourceLanguage, SourceLanguage.entries) {
-                    onChange(settings.copy(sourceLanguage = it))
-                }
-                DropdownSetting("Idioma de destino", settings.targetLanguage, TargetLanguage.entries) {
-                    onChange(settings.copy(targetLanguage = it))
-                }
-                DropdownSetting("Modo de captura", settings.captureMode, CaptureMode.entries) {
-                    onChange(settings.copy(captureMode = it))
-                }
-
-                Text("Análises por segundo: ${settings.analysesPerSecond}")
-                Slider(
-                    value = settings.analysesPerSecond.toFloat(),
-                    onValueChange = { onChange(settings.copy(analysesPerSecond = it.toInt().coerceIn(1, 5))) },
-                    valueRange = 1f..5f,
-                    steps = 3
-                )
-
-                Text("Tamanho máximo da fonte: ${settings.fontSizeSp.toInt()} sp")
-                Slider(
-                    value = settings.fontSizeSp,
-                    onValueChange = { onChange(settings.copy(fontSizeSp = it)) },
-                    valueRange = 12f..28f,
-                    steps = 15
-                )
-
-                Text("Transparência: ${(settings.overlayOpacity * 100).toInt()}%")
-                Slider(
-                    value = settings.overlayOpacity,
-                    onValueChange = { onChange(settings.copy(overlayOpacity = it)) },
-                    valueRange = 0.35f..1f
-                )
-
+                DropdownSetting("Idioma de origem", current.sourceLanguage, SourceLanguage.entries) { onChange(current.copy(sourceLanguage = it)) }
+                DropdownSetting("Idioma de destino", current.targetLanguage, TargetLanguage.entries) { onChange(current.copy(targetLanguage = it)) }
+                DropdownSetting("Modo de captura", current.captureMode, CaptureMode.entries) { onChange(current.copy(captureMode = it)) }
+                Text("Análises por segundo: ${current.analysesPerSecond}")
+                Slider(current.analysesPerSecond.toFloat(), { onChange(current.copy(analysesPerSecond = it.toInt().coerceIn(1, 5))) }, valueRange = 1f..5f, steps = 3)
+                Text("Tamanho máximo da fonte: ${current.fontSizeSp.toInt()} sp")
+                Slider(current.fontSizeSp, { onChange(current.copy(fontSizeSp = it)) }, valueRange = 12f..28f, steps = 15)
+                Text("Transparência: ${(current.overlayOpacity * 100).toInt()}%")
+                Slider(current.overlayOpacity, { onChange(current.copy(overlayOpacity = it)) }, valueRange = 0.35f..1f)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column(Modifier.weight(1f)) {
+                    Column {
                         Text("Mostrar texto original")
-                        Text("Exibe original + tradução no overlay", style = MaterialTheme.typography.bodySmall)
+                        Text("Exibe original + tradução", style = MaterialTheme.typography.bodySmall)
                     }
-                    Switch(
-                        checked = settings.showOriginal,
-                        onCheckedChange = { onChange(settings.copy(showOriginal = it)) }
-                    )
+                    Switch(current.showOriginal, { onChange(current.copy(showOriginal = it)) })
                 }
-
-                if (settings.sourceLanguage == SourceLanguage.AUTO && settings.captureMode == CaptureMode.OCR) {
-                    Text(
-                        "Automático carrega EN + JA + ZH + KO no mesmo OCR. Fixar o idioma normalmente reduz RAM e CPU.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                if (current.sourceLanguage == SourceLanguage.AUTO && current.captureMode == CaptureMode.OCR) {
+                    Text("Automático carrega EN + JA + ZH + KO no mesmo OCR. Fixar o idioma normalmente reduz RAM e CPU.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -285,18 +208,10 @@ class MainActivity : ComponentActivity() {
         var expanded by remember { mutableStateOf(false) }
         Column {
             Text(label, style = MaterialTheme.typography.labelLarge)
-            Button(onClick = { expanded = true }) {
-                Text(enumLabel(selected))
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            Button(onClick = { expanded = true }) { Text(enumLabel(selected)) }
+            DropdownMenu(expanded, { expanded = false }) {
                 options.forEach { option ->
-                    DropdownMenuItem(
-                        text = { Text(enumLabel(option)) },
-                        onClick = {
-                            expanded = false
-                            onSelected(option)
-                        }
-                    )
+                    DropdownMenuItem(text = { Text(enumLabel(option)) }, onClick = { expanded = false; onSelected(option) })
                 }
             }
         }
@@ -328,14 +243,8 @@ class MainActivity : ComponentActivity() {
                 stopService(Intent(this, ScreenOcrService::class.java))
                 settings = settings.copy(translationEnabled = true)
                 settingsStore.save(settings)
-                val connected = TranslatorAccessibilityService.requestStart()
-                statusMessage = if (connected) {
-                    "Tradução por Accessibility ativa. Sem captura de tela."
-                } else {
-                    "Serviço habilitado; aguardando o Android conectá-lo."
-                }
+                statusMessage = if (TranslatorAccessibilityService.requestStart()) "Tradução por Accessibility ativa. Sem captura de tela." else "Serviço habilitado; aguardando o Android conectá-lo."
             }
-
             CaptureMode.OCR -> {
                 if (!overlayPermission) {
                     statusMessage = "Autorize 'sobrepor outros apps' para mostrar as traduções no modo OCR."
@@ -361,27 +270,17 @@ class MainActivity : ComponentActivity() {
         statusMessage = "Tradução encerrada; caches e overlays da sessão foram descartados."
     }
 
-    private fun openAccessibilitySettings() {
-        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-    }
+    private fun openAccessibilitySettings() = startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
 
-    private fun openOverlaySettings() {
-        startActivity(
-            Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
-            )
-        )
-    }
+    private fun openOverlaySettings() = startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
 
     private fun openSystemTranslationSettings() {
-        val intent = translationSupport.settingsIntent()
-        if (intent == null) {
+        val pendingIntent = translationSupport.settingsIntent()
+        if (pendingIntent == null) {
             statusMessage = "O fabricante não disponibilizou uma tela de configurações do serviço de tradução."
             return
         }
-        runCatching { intent.send() }
-            .onFailure { statusMessage = "Não foi possível abrir as configurações de tradução do sistema." }
+        runCatching { pendingIntent.send() }.onFailure { statusMessage = "Não foi possível abrir as configurações de tradução do sistema." }
     }
 
     private fun refreshTranslationSupport() {
@@ -395,11 +294,9 @@ class MainActivity : ComponentActivity() {
         overlayPermission = Settings.canDrawOverlays(this)
         val manager = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
         val target = ComponentName(this, TranslatorAccessibilityService::class.java)
-        accessibilityEnabled = manager
-            .getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-            .any { info ->
-                val serviceInfo = info.resolveInfo?.serviceInfo ?: return@any false
-                ComponentName(serviceInfo.packageName, serviceInfo.name) == target
-            }
+        accessibilityEnabled = manager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK).any { info ->
+            val serviceInfo = info.resolveInfo?.serviceInfo ?: return@any false
+            ComponentName(serviceInfo.packageName, serviceInfo.name) == target
+        }
     }
 }
