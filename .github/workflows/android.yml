@@ -70,13 +70,40 @@ jobs:
             echo "Logging is forbidden in screen capture/accessibility pipelines."
             exit 1
           fi
-          echo "Privacy audit passed: no app network permission, captured-content logging, ML Kit, Firebase, camera, microphone or storage permission."
+          echo "Source privacy audit passed."
 
       - name: Unit tests, lint and debug build
         run: gradle --no-daemon testDebugUnitTest lintDebug assembleDebug
 
       - name: Release compilation check
         run: gradle --no-daemon assembleRelease
+
+      - name: Audit permissions in built APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          forbidden=(
+            android.permission.INTERNET
+            android.permission.CAMERA
+            android.permission.RECORD_AUDIO
+            android.permission.READ_EXTERNAL_STORAGE
+            android.permission.WRITE_EXTERNAL_STORAGE
+            android.permission.READ_MEDIA_IMAGES
+            android.permission.READ_MEDIA_VIDEO
+          )
+          for apk in app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/release/app-release-unsigned.apk; do
+            test -f "$apk"
+            permissions="$($AAPT dump permissions "$apk")"
+            echo "$permissions"
+            for permission in "${forbidden[@]}"; do
+              if grep -Fq "$permission" <<< "$permissions"; then
+                echo "Forbidden permission found in packaged APK: $permission ($apk)"
+                exit 1
+              fi
+            done
+          done
+          echo "Packaged APK privacy audit passed: no network, camera, microphone or storage/media permissions."
 
       - uses: actions/upload-artifact@v4
         with:
