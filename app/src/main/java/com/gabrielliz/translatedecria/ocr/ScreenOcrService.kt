@@ -97,11 +97,11 @@ class ScreenOcrService : Service() {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        startForeground(
+            NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+        )
     }
 
     private fun startProjection(resultCode: Int, data: Intent) {
@@ -120,8 +120,14 @@ class ScreenOcrService : Service() {
             }
         }, workerHandler)
 
-        ocrEngine = OcrEngine()
-        translationEngine = TranslationEngine()
+        runCatching {
+            ocrEngine = OcrEngine(this)
+            translationEngine = TranslationEngine(this)
+        }.onFailure {
+            stopSelf()
+            return
+        }
+
         overlayController = OverlayController(
             context = this,
             windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -219,7 +225,7 @@ class ScreenOcrService : Service() {
                     mainHandler.post { overlayController?.showTranslations(translated, settings) }
                 }
             } catch (_: Throwable) {
-                // Intentionally no captured text or image is logged.
+                // Intentionally no captured text, image or exception payload is logged.
             } finally {
                 if (!bitmap.isRecycled) bitmap.recycle()
                 processing.set(false)
