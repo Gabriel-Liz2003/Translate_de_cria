@@ -1,23 +1,29 @@
 package com.gabrielliz.translatedecria.translation
 
+import android.content.Context
+import android.icu.util.ULocale
+import android.os.CancellationSignal
+import android.view.translation.TranslationContext
+import android.view.translation.TranslationRequest
+import android.view.translation.TranslationRequestValue
+import android.view.translation.TranslationResponse
+import android.view.translation.TranslationResponseValue
+import android.view.translation.TranslationManager
+import android.view.translation.TranslationSpec
+import android.view.translation.Translator
 import com.gabrielliz.translatedecria.model.ScreenTextBlock
 import com.gabrielliz.translatedecria.model.SourceLanguage
 import com.gabrielliz.translatedecria.model.TargetLanguage
 import com.gabrielliz.translatedecria.model.TranslatedBlock
-import com.gabrielliz.translatedecria.util.awaitResult
-import com.google.mlkit.nl.languageid.LanguageIdentification
-import com.google.mlkit.nl.languageid.LanguageIdentificationOptions
-import com.google.mlkit.nl.languageid.LanguageIdentifier
-import com.google.mlkit.nl.translate.TranslateLanguage
-import com.google.mlkit.nl.translate.Translation
-import com.google.mlkit.nl.translate.Translator
-import com.google.mlkit.nl.translate.TranslatorOptions
 import java.io.Closeable
+import java.util.concurrent.Executor
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 
-class TranslationEngine : Closeable {
-    private val languageIdentifier: LanguageIdentifier = LanguageIdentification.getClient(
-        LanguageIdentificationOptions.Builder().setConfidenceThreshold(0.34f).build()
-    )
+class TranslationEngine(context: Context) : Closeable {
+    private val manager = context.applicationContext.getSystemService(TranslationManager::class.java)
+    private val directExecutor = Executor { runnable -> runnable.run() }
     private val translators = mutableMapOf<String, Translator>()
     private val translationCache = MemoryTranslationCache(300)
 
@@ -35,55 +41,81 @@ class TranslationEngine : Closeable {
 
             val sourceTag = sourceLanguage.languageTag
                 ?: block.languageHint
-                ?: identifyLanguage(text)
+                ?: LanguageHeuristics.detect(text)
                 ?: continue
-            val normalizedSource = TranslateLanguage.fromLanguageTag(sourceTag) ?: continue
-            val normalizedTarget = TranslateLanguage.fromLanguageTag(targetLanguage.languageTag) ?: continue
+            val targetTag = targetLanguage.languageTag
 
-            if (normalizedSource == normalizedTarget) {
+            if (sourceTag.equals(targetTag, ignoreCase = true)) {
                 result += TranslatedBlock(text, text, block.bounds, sourceTag)
                 continue
             }
 
-            val cacheKey = "$normalizedSource>$normalizedTarget:${normalizeForCache(text)}"
-            val translated = translationCache.get(cacheKey) ?: run {
-                val translator = translatorFor(normalizedSource, normalizedTarget)
-                translator.downloadModelIfNeeded().awaitResult()
-                translator.translate(text).awaitResult().also { translationCache.put(cacheKey, it) }
-            }
+            val cacheKey = "$sourceTag>$targetTag:${normalizeForCache(text)}"
+            val translated = translationCache.get(cacheKey) ?: withTimeoutOrNull(8_000L) {
+                val translator = translatorFor(sourceTag, targetTag) ?: return@withTimeoutOrNull null
+                translateText(translator, text)
+            }?.also { translationCache.put(cacheKey, it) }
 
-            result += TranslatedBlock(text, translated, block.bounds, sourceTag)
+            if (!translated.isNullOrBlank()) {
+                result += TranslatedBlock(text, translated, block.bounds, sourceTag)
+            }
         }
 
         return result
     }
 
-    private suspend fun identifyLanguage(text: String): String? {
-        val language = languageIdentifier.identifyLanguage(text).awaitResult()
-        return language.takeUnless { it == "und" }
-    }
+    private suspend fun translatorFor(sourceTag: String, targetTag: String): Translator? {
+        val key = "$sourceTag>$targetTag"
+        synchronized(translators) { translators[key] }?.let { return it }
 
-    private fun translatorFor(source: String, target: String): Translator {
-        val key = "$source>$target"
-        return synchronized(translators) {
-            translators.getOrPut(key) {
-                Translation.getClient(
-                    TranslatorOptions.Builder()
-                        .setSourceLanguage(source)
-                        .setTargetLanguage(target)
-                        .build()
-                )
+        val sourceSpec = TranslationSpec(ULocale.forLanguageTag(sourceTag), TranslationSpec.DATA_FORMAT_TEXT)
+        val targetSpec = TranslationSpec(ULocale.forLanguageTag(targetTag), TranslationSpec.DATA_FORMAT_TEXT)
+        val translationContext = TranslationContext.Builder(sourceSpec, targetSpec)
+            .setTranslationFlags(TranslationContext.FLAG_LOW_LATENCY)
+            .build()
+
+        val created = suspendCancellableCoroutine { continuation ->
+            manager.createOnDeviceTranslator(translationContext, directExecutor) { translator ->
+                if (continuation.isActive) continuation.resume(translator)
             }
+        } ?: return null
+
+        return synchronized(translators) {
+            translators[key] ?: created.also { translators[key] = it }
         }
     }
+
+    private suspend fun translateText(translator: Translator, text: String): String? =
+        suspendCancellableCoroutine { continuation ->
+            val cancellationSignal = CancellationSignal()
+            continuation.invokeOnCancellation { cancellationSignal.cancel() }
+            val request = TranslationRequest.Builder()
+                .setTranslationRequestValues(listOf(TranslationRequestValue.forText(text)))
+                .build()
+
+            translator.translate(request, cancellationSignal, directExecutor) { response ->
+                if (!continuation.isActive || !response.isFinalResponse) return@translate
+                val value = response.translationResponseValues.get(0)
+                val translated = if (
+                    response.translationStatus == TranslationResponse.TRANSLATION_STATUS_SUCCESS &&
+                    value?.statusCode == TranslationResponseValue.STATUS_SUCCESS
+                ) {
+                    value.text?.toString()
+                } else {
+                    null
+                }
+                continuation.resume(translated)
+            }
+        }
 
     private fun normalizeForCache(text: String): String =
         text.lowercase().replace(Regex("\\s+"), " ").trim()
 
     override fun close() {
-        languageIdentifier.close()
         synchronized(translators) {
-            translators.values.forEach(Translator::close)
+            translators.values.forEach { translator ->
+                if (!translator.isDestroyed) translator.destroy()
+            }
             translators.clear()
         }
         translationCache.clear()
