@@ -74,7 +74,7 @@ class TranslationEngine(context: Context) : Closeable {
             .setTranslationFlags(TranslationContext.FLAG_LOW_LATENCY)
             .build()
 
-        val created = suspendCancellableCoroutine { continuation ->
+        val created = suspendCancellableCoroutine<Translator?> { continuation ->
             manager.createOnDeviceTranslator(translationContext, directExecutor) { translator ->
                 if (continuation.isActive) continuation.resume(translator)
             }
