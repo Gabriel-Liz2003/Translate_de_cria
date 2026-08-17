@@ -3,6 +3,7 @@ package com.gabrielliz.translatedecria.overlay
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
@@ -11,6 +12,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.gabrielliz.translatedecria.model.CaptureMode
 import com.gabrielliz.translatedecria.model.SettingsSnapshot
 import com.gabrielliz.translatedecria.model.TranslatedBlock
 import kotlin.math.min
@@ -36,6 +38,12 @@ class OverlayController(
     private var paused = false
     private var translationsHidden = false
 
+    @Volatile
+    private var renderedTranslationBounds: List<Rect> = emptyList()
+
+    @Volatile
+    private var renderedControlBounds: Rect? = null
+
     fun showControlBubble() {
         if (controlRoot != null) return
         val root = LinearLayout(appContext).apply {
@@ -59,21 +67,29 @@ class OverlayController(
             y = dp(96)
         }
         windowManager.addView(root, params)
+        updateControlBoundsWhenLaidOut(root)
     }
 
     fun showTranslations(blocks: List<TranslatedBlock>, settings: SettingsSnapshot) {
         if (translationsHidden) return
         val layer = ensureTranslationLayer()
         layer.removeAllViews()
-        if (blocks.isEmpty()) return
+        if (blocks.isEmpty()) {
+            renderedTranslationBounds = emptyList()
+            return
+        }
 
         val metrics = appContext.resources.displayMetrics
         val placements = OverlayLayoutEngine.resolve(
             bounds = blocks.map { OverlayLayoutEngine.Box(it.bounds.left, it.bounds.top, it.bounds.right, it.bounds.bottom) },
             screenWidth = metrics.widthPixels,
             screenHeight = metrics.heightPixels,
-            gapPx = dp(4)
+            gapPx = dp(4),
+            preferAdjacent = settings.captureMode == CaptureMode.OCR
         )
+        renderedTranslationBounds = placements.map { placement ->
+            placement.placed.let { Rect(it.left, it.top, it.right, it.bottom) }
+        }
 
         blocks.zip(placements).forEach { (block, placement) ->
             val rect = placement.placed
@@ -102,6 +118,10 @@ class OverlayController(
         }
     }
 
+    fun translationBoundsSnapshot(): List<Rect> = renderedTranslationBounds.map(::Rect)
+
+    fun controlBoundsSnapshot(): Rect? = renderedControlBounds?.let(::Rect)
+
     fun setPaused(value: Boolean) {
         paused = value
         rebuildControls()
@@ -110,11 +130,13 @@ class OverlayController(
     fun setTranslationsHidden(hidden: Boolean) {
         translationsHidden = hidden
         translationLayer?.visibility = if (hidden) View.GONE else View.VISIBLE
+        if (hidden) renderedTranslationBounds = emptyList()
         rebuildControls()
     }
 
     fun clearTranslations() {
         translationLayer?.removeAllViews()
+        renderedTranslationBounds = emptyList()
     }
 
     fun destroy() {
@@ -122,6 +144,8 @@ class OverlayController(
         controlRoot?.let { runCatching { windowManager.removeViewImmediate(it) } }
         translationLayer = null
         controlRoot = null
+        renderedTranslationBounds = emptyList()
+        renderedControlBounds = null
     }
 
     private fun ensureTranslationLayer(): FrameLayout {
@@ -149,6 +173,7 @@ class OverlayController(
         root.removeAllViews()
         if (!expanded) {
             root.addView(controlButton("T") { expanded = true; rebuildControls() })
+            updateControlBoundsWhenLaidOut(root)
             return
         }
         root.addView(controlButton(if (paused) "Continuar" else "Pausar") { callback.onTogglePause() })
@@ -157,6 +182,21 @@ class OverlayController(
         root.addView(controlButton("Config") { callback.onOpenSettings() })
         root.addView(controlButton("Fechar") { callback.onStop() })
         root.addView(controlButton("‹") { expanded = false; rebuildControls() })
+        updateControlBoundsWhenLaidOut(root)
+    }
+
+    private fun updateControlBoundsWhenLaidOut(root: View) {
+        root.post {
+            if (!root.isAttachedToWindow || root.width <= 0 || root.height <= 0) return@post
+            val location = IntArray(2)
+            root.getLocationOnScreen(location)
+            renderedControlBounds = Rect(
+                location[0],
+                location[1],
+                location[0] + root.width,
+                location[1] + root.height
+            )
+        }
     }
 
     private fun controlButton(label: String, onClick: () -> Unit): Button = Button(appContext).apply {
