@@ -16,7 +16,7 @@ enum class SourceLanguage(val label: String, val languageTag: String?) {
 }
 
 enum class TargetLanguage(val label: String, val languageTag: String) {
-    PORTUGUESE_BRAZIL("Português (Brasil)", "pt")
+    PORTUGUESE_BRAZIL("Português (Brasil)", "pt-BR")
 }
 
 data class SettingsSnapshot(
