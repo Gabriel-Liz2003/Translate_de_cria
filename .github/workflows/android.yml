@@ -1,0 +1,224 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main, "feature/**", "fix/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publicar GitHub Release assinada"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Fetch pinned local OCR models
+        run: bash scripts/fetch-tessdata.sh
+
+      - name: Privacy static audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          MANIFEST=app/src/main/AndroidManifest.xml
+          forbidden=(
+            android.permission.INTERNET
+            android.permission.CAMERA
+            android.permission.RECORD_AUDIO
+            android.permission.READ_EXTERNAL_STORAGE
+            android.permission.WRITE_EXTERNAL_STORAGE
+            android.permission.READ_MEDIA_IMAGES
+            android.permission.READ_MEDIA_VIDEO
+          )
+          for permission in "${forbidden[@]}"; do
+            if grep -q "$permission" "$MANIFEST"; then
+              echo "Forbidden permission found: $permission"
+              exit 1
+            fi
+          done
+          if grep -R -n -E 'com\.google\.mlkit|FirebaseAnalytics|FirebaseCrashlytics|MediaRecorder' app/src/main/java; then
+            echo "Forbidden cloud/telemetry/recording API found in production source."
+            exit 1
+          fi
+          if grep -R -n -E 'Log\.(v|d|i|w|e)\(' app/src/main/java/com/gabrielliz/translatedecria/ocr app/src/main/java/com/gabrielliz/translatedecria/accessibility; then
+            echo "Logging is forbidden in screen capture/accessibility pipelines."
+            exit 1
+          fi
+          echo "Source privacy audit passed."
+
+      - name: Unit tests, lint and debug build
+        run: gradle --no-daemon testDebugUnitTest lintDebug assembleDebug
+
+      - name: Release compilation check
+        run: gradle --no-daemon assembleRelease
+
+      - name: Audit permissions in built APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          forbidden=(
+            android.permission.INTERNET
+            android.permission.CAMERA
+            android.permission.RECORD_AUDIO
+            android.permission.READ_EXTERNAL_STORAGE
+            android.permission.WRITE_EXTERNAL_STORAGE
+            android.permission.READ_MEDIA_IMAGES
+            android.permission.READ_MEDIA_VIDEO
+          )
+          for apk in app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/release/app-release-unsigned.apk; do
+            test -f "$apk"
+            permissions="$($AAPT dump permissions "$apk")"
+            echo "$permissions"
+            for permission in "${forbidden[@]}"; do
+              if grep -Fq "$permission" <<< "$permissions"; then
+                echo "Forbidden permission found in packaged APK: $permission ($apk)"
+                exit 1
+              fi
+            done
+          done
+          echo "Packaged APK privacy audit passed: no network, camera, microphone or storage/media permissions."
+
+      - name: Prepare test APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk Translate-de-Cria-v0.1.0-debug.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Translate-de-Cria-v0.1.0-debug
+          path: Translate-de-Cria-v0.1.0-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  signed-release:
+    needs: test-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require signing secrets for publishing
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release && env.KEYSTORE_B64 == '' }}
+        run: |
+          echo "Stable release blocked: persistent Android signing secrets are not configured."
+          exit 1
+
+      - name: Signing not configured yet
+        if: ${{ env.KEYSTORE_B64 == '' }}
+        run: echo "Skipping signed build until the persistent signing key is stored in GitHub Secrets."
+
+      - uses: actions/setup-java@v5
+        if: ${{ env.KEYSTORE_B64 != '' }}
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+        if: ${{ env.KEYSTORE_B64 != '' }}
+
+      - name: Install Android SDK
+        if: ${{ env.KEYSTORE_B64 != '' }}
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: ${{ env.KEYSTORE_B64 != '' }}
+        with:
+          gradle-version: "8.13"
+
+      - name: Fetch pinned local OCR models
+        if: ${{ env.KEYSTORE_B64 != '' }}
+        run: bash scripts/fetch-tessdata.sh
+
+      - name: Restore persistent signing key
+        if: ${{ env.KEYSTORE_B64 != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEYSTORE_PATH="$RUNNER_TEMP/translate-de-cria-release.jks"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+      - name: Build signed release
+        if: ${{ env.KEYSTORE_B64 != '' }}
+        run: gradle --no-daemon assembleRelease
+
+      - name: Validate identity, version and signing certificate
+        if: ${{ env.KEYSTORE_B64 != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release.apk
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          test -f "$APK"
+
+          BADGING="$($AAPT dump badging "$APK" | head -n 1)"
+          echo "$BADGING" | grep -q "name='com.gabrielliz.translatedecria'"
+          echo "$BADGING" | grep -q "versionCode='1'"
+          echo "$BADGING" | grep -q "versionName='0.1.0'"
+
+          $APKSIGNER verify --verbose --print-certs "$APK"
+          ACTUAL="$($APKSIGNER verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:lower:]' '[:upper:]')"
+          EXPECTED="$(tr -d '[:space:]' < SIGNING_CERT_SHA256.txt | tr '[:lower:]' '[:upper:]')"
+          if [[ -z "$EXPECTED" || "$EXPECTED" == "UNCONFIGURED" ]]; then
+            echo "SIGNING_CERT_SHA256.txt is not configured. Refusing to publish an update with an unregistered key."
+            exit 1
+          fi
+          if [[ "$ACTUAL" != "$EXPECTED" ]]; then
+            echo "Signing fingerprint mismatch. Refusing publication."
+            exit 1
+          fi
+          echo "Official signing fingerprint verified: $ACTUAL"
+
+          cp "$APK" "Translate-de-Cria-v0.1.0.apk"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ env.KEYSTORE_B64 != '' && success() }}
+        with:
+          name: Translate-de-Cria-v0.1.0-signed
+          path: Translate-de-Cria-v0.1.0.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release && env.KEYSTORE_B64 != '' && success() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v0.1.0" "Translate-de-Cria-v0.1.0.apk#Translate-de-Cria-v0.1.0.apk" \
+            --title "Translate de Cria v0.1.0" \
+            --notes-file RELEASE_NOTES.md \
+            --target "$GITHUB_SHA"
