@@ -39,12 +39,16 @@ jobs:
         with:
           gradle-version: "8.13"
 
+      - name: Fetch pinned local OCR models
+        run: bash scripts/fetch-tessdata.sh
+
       - name: Privacy static audit
         shell: bash
         run: |
           set -euo pipefail
           MANIFEST=app/src/main/AndroidManifest.xml
           forbidden=(
+            android.permission.INTERNET
             android.permission.CAMERA
             android.permission.RECORD_AUDIO
             android.permission.READ_EXTERNAL_STORAGE
@@ -58,11 +62,15 @@ jobs:
               exit 1
             fi
           done
-          if grep -R -n -E 'FileOutputStream|MediaRecorder|FirebaseAnalytics|FirebaseCrashlytics' app/src/main/java; then
-            echo "Potential persistence/recording/telemetry API found in production source."
+          if grep -R -n -E 'com\.google\.mlkit|FirebaseAnalytics|FirebaseCrashlytics|MediaRecorder' app/src/main/java; then
+            echo "Forbidden cloud/telemetry/recording API found in production source."
             exit 1
           fi
-          echo "Privacy audit passed."
+          if grep -R -n -E 'Log\.(v|d|i|w|e)\(' app/src/main/java/com/gabrielliz/translatedecria/ocr app/src/main/java/com/gabrielliz/translatedecria/accessibility; then
+            echo "Logging is forbidden in screen capture/accessibility pipelines."
+            exit 1
+          fi
+          echo "Privacy audit passed: no app network permission, captured-content logging, ML Kit, Firebase, camera, microphone or storage permission."
 
       - name: Unit tests, lint and debug build
         run: gradle --no-daemon testDebugUnitTest lintDebug assembleDebug
@@ -118,6 +126,10 @@ jobs:
         if: ${{ env.KEYSTORE_B64 != '' }}
         with:
           gradle-version: "8.13"
+
+      - name: Fetch pinned local OCR models
+        if: ${{ env.KEYSTORE_B64 != '' }}
+        run: bash scripts/fetch-tessdata.sh
 
       - name: Restore persistent signing key
         if: ${{ env.KEYSTORE_B64 != '' }}
