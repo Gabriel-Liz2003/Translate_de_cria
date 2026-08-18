@@ -22,7 +22,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 
 class TranslationEngine(context: Context) : Closeable {
-    private val manager = context.applicationContext.getSystemService(TranslationManager::class.java)
+    private val manager: TranslationManager? =
+        context.applicationContext.getSystemService(TranslationManager::class.java)
     private val directExecutor = Executor { runnable -> runnable.run() }
     private val translators = mutableMapOf<String, Translator>()
     private val translationCache = MemoryTranslationCache(300)
@@ -32,7 +33,7 @@ class TranslationEngine(context: Context) : Closeable {
         sourceLanguage: SourceLanguage,
         targetLanguage: TargetLanguage
     ): List<TranslatedBlock> {
-        if (blocks.isEmpty()) return emptyList()
+        if (blocks.isEmpty() || manager == null) return emptyList()
         val result = ArrayList<TranslatedBlock>(blocks.size)
 
         for (block in blocks) {
@@ -65,6 +66,7 @@ class TranslationEngine(context: Context) : Closeable {
     }
 
     private suspend fun translatorFor(sourceTag: String, targetTag: String): Translator? {
+        val translationManager = manager ?: return null
         val key = "$sourceTag>$targetTag"
         synchronized(translators) { translators[key] }?.let { return it }
 
@@ -75,7 +77,7 @@ class TranslationEngine(context: Context) : Closeable {
             .build()
 
         val created = suspendCancellableCoroutine<Translator?> { continuation ->
-            manager.createOnDeviceTranslator(translationContext, directExecutor) { translator ->
+            translationManager.createOnDeviceTranslator(translationContext, directExecutor) { translator ->
                 if (continuation.isActive) continuation.resume(translator)
             }
         } ?: return null

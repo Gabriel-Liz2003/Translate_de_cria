@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1 — 18/08/2026
+
+- Corrigido crash ao tocar em **Configurações de tradução do Android** em aparelhos/ROMs sem `TranslationService` compatível.
+- O acesso às configurações de tradução agora é nulo-seguro e protegido contra falhas do OEM.
+- O botão de configurações fica desativado quando o Android não fornece uma tela compatível, com mensagem explicando a limitação.
+- O `TranslationEngine` passa a tolerar ausência do `TranslationManager` sem derrubar serviços ou overlays.
+- Menu flutuante expandido reorganizado verticalmente para evitar botões espremidos/ilegíveis em telas estreitas.
+- `versionCode` aumentado para 2 e `versionName` para 0.1.1.
+
 ## 0.1.0 — 17/08/2026
 
 - Criada interface Android em Kotlin + Jetpack Compose + Material 3.
