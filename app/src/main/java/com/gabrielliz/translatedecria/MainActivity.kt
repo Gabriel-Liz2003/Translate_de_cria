@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
     private var statusMessage by mutableStateOf("Pronto")
     private var translationModelsMessage by mutableStateOf("Verificando tradução on-device…")
     private var translationSettingsAvailable by mutableStateOf(false)
+    private var translationServiceAvailable by mutableStateOf<Boolean?>(null)
     private var showOcrPrivacyDialog by mutableStateOf(false)
 
     private val projectionLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -146,6 +147,13 @@ class MainActivity : ComponentActivity() {
                             Text("Processamento local", fontWeight = FontWeight.Bold)
                             Text("Os modelos OCR EN/JA/ZH/KO são embutidos no APK e copiados somente para o armazenamento privado do próprio app.")
                             Text(translationModelsMessage, style = MaterialTheme.typography.bodySmall)
+                            if (translationServiceAvailable == false) {
+                                Text(
+                                    "Importante: a captura pode funcionar, mas esta ROM não oferece o motor de tradução do Android. A sessão de tradução não será iniciada para evitar indicar sucesso sem produzir traduções.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                             Button(
                                 onClick = ::openSystemTranslationSettings,
                                 enabled = translationSettingsAvailable
@@ -245,6 +253,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun activateTranslation() {
+        if (translationServiceAvailable == false) {
+            statusMessage = "Tradução não iniciada: esta ROM não fornece o motor on-device do Android. É necessário um fallback local independente do fabricante."
+            return
+        }
+
         when (settings.captureMode) {
             CaptureMode.ACCESSIBILITY -> {
                 if (!accessibilityEnabled) {
@@ -305,6 +318,7 @@ class MainActivity : ComponentActivity() {
             val summary = runCatching { translationSupport.query() }.getOrNull()
             translationModelsMessage = summary?.userMessage
                 ?: "Não foi possível consultar o serviço de tradução on-device deste aparelho."
+            translationServiceAvailable = summary?.serviceAvailable ?: false
             translationSettingsAvailable = runCatching { translationSupport.settingsIntent() != null }.getOrDefault(false)
         }
     }
