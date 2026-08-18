@@ -106,12 +106,12 @@ jobs:
           echo "Packaged APK privacy audit passed: no network, camera, microphone or storage/media permissions."
 
       - name: Prepare test APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk Translate-de-Cria-v0.1.0-debug.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk Translate-de-Cria-v0.1.1-debug.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Translate-de-Cria-v0.1.0-debug
-          path: Translate-de-Cria-v0.1.0-debug.apk
+          name: Translate-de-Cria-v0.1.1-debug
+          path: Translate-de-Cria-v0.1.1-debug.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -187,8 +187,8 @@ jobs:
 
           BADGING="$($AAPT dump badging "$APK" | head -n 1)"
           echo "$BADGING" | grep -q "name='com.gabrielliz.translatedecria'"
-          echo "$BADGING" | grep -q "versionCode='1'"
-          echo "$BADGING" | grep -q "versionName='0.1.0'"
+          echo "$BADGING" | grep -q "versionCode='2'"
+          echo "$BADGING" | grep -q "versionName='0.1.1'"
 
           $APKSIGNER verify --verbose --print-certs "$APK"
           ACTUAL="$($APKSIGNER verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:lower:]' '[:upper:]')"
@@ -203,13 +203,13 @@ jobs:
           fi
           echo "Official signing fingerprint verified: $ACTUAL"
 
-          cp "$APK" "Translate-de-Cria-v0.1.0.apk"
+          cp "$APK" "Translate-de-Cria-v0.1.1.apk"
 
       - uses: actions/upload-artifact@v4
         if: ${{ env.KEYSTORE_B64 != '' && success() }}
         with:
-          name: Translate-de-Cria-v0.1.0-signed
-          path: Translate-de-Cria-v0.1.0.apk
+          name: Translate-de-Cria-v0.1.1-signed
+          path: Translate-de-Cria-v0.1.1.apk
           if-no-files-found: error
           retention-days: 30
 
@@ -218,7 +218,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v0.1.0" "Translate-de-Cria-v0.1.0.apk#Translate-de-Cria-v0.1.0.apk" \
-            --title "Translate de Cria v0.1.0" \
+          gh release create "v0.1.1" "Translate-de-Cria-v0.1.1.apk#Translate-de-Cria-v0.1.1.apk" \
+            --title "Translate de Cria v0.1.1" \
             --notes-file RELEASE_NOTES.md \
             --target "$GITHUB_SHA"
