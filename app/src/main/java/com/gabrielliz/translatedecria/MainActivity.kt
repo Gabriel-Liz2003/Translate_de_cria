@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
     private var overlayPermission by mutableStateOf(false)
     private var statusMessage by mutableStateOf("Pronto")
     private var translationModelsMessage by mutableStateOf("Verificando tradução on-device…")
+    private var translationSettingsAvailable by mutableStateOf(false)
     private var showOcrPrivacyDialog by mutableStateOf(false)
 
     private val projectionLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -145,7 +146,18 @@ class MainActivity : ComponentActivity() {
                             Text("Processamento local", fontWeight = FontWeight.Bold)
                             Text("Os modelos OCR EN/JA/ZH/KO são embutidos no APK e copiados somente para o armazenamento privado do próprio app.")
                             Text(translationModelsMessage, style = MaterialTheme.typography.bodySmall)
-                            Button(onClick = ::openSystemTranslationSettings) { Text("Configurações de tradução do Android") }
+                            Button(
+                                onClick = ::openSystemTranslationSettings,
+                                enabled = translationSettingsAvailable
+                            ) {
+                                Text("Configurações de tradução do Android")
+                            }
+                            if (!translationSettingsAvailable) {
+                                Text(
+                                    "Esta ROM não disponibilizou uma tela de configurações de tradução para o aplicativo abrir.",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
                             Text(
                                 "Se faltar um modelo de tradução, o download é gerenciado pelo serviço do sistema. O Translate de Cria continua sem permissão de rede.",
                                 style = MaterialTheme.typography.bodySmall
@@ -275,18 +287,25 @@ class MainActivity : ComponentActivity() {
     private fun openOverlaySettings() = startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
 
     private fun openSystemTranslationSettings() {
-        val pendingIntent = translationSupport.settingsIntent()
+        val pendingIntent = runCatching { translationSupport.settingsIntent() }.getOrNull()
         if (pendingIntent == null) {
-            statusMessage = "O fabricante não disponibilizou uma tela de configurações do serviço de tradução."
+            translationSettingsAvailable = false
+            statusMessage = "Este Android/ROM não disponibilizou configurações de tradução on-device."
             return
         }
-        runCatching { pendingIntent.send() }.onFailure { statusMessage = "Não foi possível abrir as configurações de tradução do sistema." }
+        runCatching { pendingIntent.send() }
+            .onFailure {
+                translationSettingsAvailable = false
+                statusMessage = "O Android recusou abrir as configurações de tradução; o app permaneceu aberto."
+            }
     }
 
     private fun refreshTranslationSupport() {
         lifecycleScope.launch {
-            translationModelsMessage = runCatching { translationSupport.query().userMessage }
-                .getOrElse { "Não foi possível consultar o serviço de tradução on-device deste aparelho." }
+            val summary = runCatching { translationSupport.query() }.getOrNull()
+            translationModelsMessage = summary?.userMessage
+                ?: "Não foi possível consultar o serviço de tradução on-device deste aparelho."
+            translationSettingsAvailable = runCatching { translationSupport.settingsIntent() != null }.getOrDefault(false)
         }
     }
 
