@@ -171,18 +171,33 @@ class OverlayController(
     private fun rebuildControls() {
         val root = controlRoot ?: return
         root.removeAllViews()
+        root.orientation = if (expanded) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        root.gravity = if (expanded) Gravity.END else Gravity.CENTER_VERTICAL
+
         if (!expanded) {
             root.addView(controlButton("T") { expanded = true; rebuildControls() })
             updateControlBoundsWhenLaidOut(root)
             return
         }
-        root.addView(controlButton(if (paused) "Continuar" else "Pausar") { callback.onTogglePause() })
-        root.addView(controlButton("Traduzir") { callback.onRefresh() })
-        root.addView(controlButton(if (translationsHidden) "Mostrar" else "Ocultar") { callback.onToggleTranslations() })
-        root.addView(controlButton("Config") { callback.onOpenSettings() })
-        root.addView(controlButton("Fechar") { callback.onStop() })
-        root.addView(controlButton("‹") { expanded = false; rebuildControls() })
+
+        addExpandedButton(root, if (paused) "Continuar" else "Pausar") { callback.onTogglePause() }
+        addExpandedButton(root, "Traduzir novamente") { callback.onRefresh() }
+        addExpandedButton(root, if (translationsHidden) "Mostrar traduções" else "Ocultar traduções") { callback.onToggleTranslations() }
+        addExpandedButton(root, "Configurações") { callback.onOpenSettings() }
+        addExpandedButton(root, "Encerrar") { callback.onStop() }
+        addExpandedButton(root, "Recolher") { expanded = false; rebuildControls() }
         updateControlBoundsWhenLaidOut(root)
+    }
+
+    private fun addExpandedButton(root: LinearLayout, label: String, onClick: () -> Unit) {
+        val button = controlButton(label, onClick).apply {
+            textSize = 12f
+            maxLines = 1
+        }
+        root.addView(
+            button,
+            LinearLayout.LayoutParams(dp(154), LinearLayout.LayoutParams.WRAP_CONTENT)
+        )
     }
 
     private fun updateControlBoundsWhenLaidOut(root: View) {
