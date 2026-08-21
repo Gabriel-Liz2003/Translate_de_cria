@@ -22,7 +22,8 @@ mkdir -p "$OUT_DIR"
 for file in "${FILES[@]}"; do
   target="$OUT_DIR/$file"
   echo "Fetching pinned OCR model: $file"
-  curl --fail --silent --show-error --location --retry 3 \
+  curl --fail --silent --show-error --location \
+    --retry 4 --retry-all-errors --retry-delay 2 --connect-timeout 20 \
     "$BASE_URL/$file" \
     --output "$target"
   test -s "$target"
