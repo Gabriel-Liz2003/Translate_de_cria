@@ -22,10 +22,10 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 
 class TranslationEngine(context: Context) : Closeable {
-    private val manager: TranslationManager? =
-        context.applicationContext.getSystemService(TranslationManager::class.java)
+    private val manager: TranslationManager? = context.applicationContext.getSystemService(TranslationManager::class.java)
     private val directExecutor = Executor { runnable -> runnable.run() }
     private val translators = mutableMapOf<String, Translator>()
+    private val fallback = FlavorTranslationFallback()
     private val translationCache = MemoryTranslationCache(300)
 
     suspend fun translateBlocks(
@@ -33,7 +33,7 @@ class TranslationEngine(context: Context) : Closeable {
         sourceLanguage: SourceLanguage,
         targetLanguage: TargetLanguage
     ): List<TranslatedBlock> {
-        if (blocks.isEmpty() || manager == null) return emptyList()
+        if (blocks.isEmpty()) return emptyList()
         val result = ArrayList<TranslatedBlock>(blocks.size)
 
         for (block in blocks) {
@@ -52,18 +52,23 @@ class TranslationEngine(context: Context) : Closeable {
             }
 
             val cacheKey = "$sourceTag>$targetTag:${normalizeForCache(text)}"
-            val translated = translationCache.get(cacheKey) ?: withTimeoutOrNull(8_000L) {
-                val translator = translatorFor(sourceTag, targetTag) ?: return@withTimeoutOrNull null
-                translateText(translator, text)
-            }?.also { translationCache.put(cacheKey, it) }
+            val translated = translationCache.get(cacheKey)
+                ?: translateWithSystem(sourceTag, targetTag, text)
+                ?: fallback.translate(sourceTag, targetTag, text)
 
             if (!translated.isNullOrBlank()) {
+                translationCache.put(cacheKey, translated)
                 result += TranslatedBlock(text, translated, block.bounds, sourceTag)
             }
         }
-
         return result
     }
+
+    private suspend fun translateWithSystem(sourceTag: String, targetTag: String, text: String): String? =
+        withTimeoutOrNull(4_000L) {
+            val translator = translatorFor(sourceTag, targetTag) ?: return@withTimeoutOrNull null
+            translateText(translator, text)
+        }
 
     private suspend fun translatorFor(sourceTag: String, targetTag: String): Translator? {
         val translationManager = manager ?: return null
@@ -120,6 +125,7 @@ class TranslationEngine(context: Context) : Closeable {
             }
             translators.clear()
         }
+        fallback.close()
         translationCache.clear()
     }
 }
