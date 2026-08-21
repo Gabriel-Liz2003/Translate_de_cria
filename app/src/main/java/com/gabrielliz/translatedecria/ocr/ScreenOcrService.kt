@@ -16,15 +16,16 @@ import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
+import android.provider.Settings
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import com.gabrielliz.translatedecria.AppSettingsStore
-import com.gabrielliz.translatedecria.MainActivity
 import com.gabrielliz.translatedecria.R
 import com.gabrielliz.translatedecria.overlay.OverlayController
 import com.gabrielliz.translatedecria.translation.TranslationEngine
@@ -86,7 +87,7 @@ class ScreenOcrService : Service() {
         val openApp = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java),
+            appLaunchIntent(),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -150,10 +151,7 @@ class ScreenOcrService : Service() {
                 }
 
                 override fun onOpenSettings() {
-                    startActivity(
-                        Intent(this@ScreenOcrService, MainActivity::class.java)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                    )
+                    startActivity(appLaunchIntent())
                 }
 
                 override fun onStop() = stopSelf()
@@ -317,6 +315,12 @@ class ScreenOcrService : Service() {
         }
         manager.createNotificationChannel(channel)
     }
+
+    private fun appLaunchIntent(): Intent =
+        packageManager.getLaunchIntentForPackage(packageName)
+            ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP) }
+            ?: Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
     private fun extractProjectionData(intent: Intent?): Intent? {
         if (intent == null) return null
