@@ -63,7 +63,7 @@ class SafeMainActivity : ComponentActivity() {
                 putExtra(ScreenOcrService.EXTRA_RESULT_DATA, result.data)
             }
             startForegroundService(serviceIntent)
-            statusMessage = "OCR local ativo. Nenhum frame é salvo."
+            statusMessage = "OCR ativo. Na primeira tradução de cada idioma, o modelo local pode ser baixado; o texto da tela não é enviado."
         } else {
             settingsStore.setTranslationEnabled(false)
             statusMessage = "Captura não autorizada."
@@ -77,9 +77,7 @@ class SafeMainActivity : ComponentActivity() {
         settingsStore.save(settings)
         overlayPermission = Settings.canDrawOverlays(this)
         setContent {
-            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
-                Screen()
-            }
+            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) { Screen() }
         }
     }
 
@@ -102,8 +100,9 @@ class SafeMainActivity : ComponentActivity() {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Versão de compatibilidade", fontWeight = FontWeight.Bold)
-                            Text("Esta edição NÃO instala AccessibilityService. Ela usa somente OCR por MediaProjection durante uma sessão autorizada pelo Android.")
-                            Text("Continua sem permissão de internet, câmera, microfone ou armazenamento. FLAG_SECURE é respeitado.", style = MaterialTheme.typography.bodySmall)
+                            Text("Esta edição NÃO instala AccessibilityService. Ela usa OCR por MediaProjection durante uma sessão autorizada pelo Android.")
+                            Text("A tradução é feita no aparelho. A internet é usada somente para baixar os modelos de idioma do ML Kit quando ainda não estiverem no dispositivo; pixels e texto reconhecido não são enviados.", style = MaterialTheme.typography.bodySmall)
+                            Text("Powered by Google ML Kit", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -143,7 +142,7 @@ class SafeMainActivity : ComponentActivity() {
             AlertDialog(
                 onDismissRequest = { showPrivacyDialog = false },
                 title = { Text("Captura temporária da tela") },
-                text = { Text("O Android pedirá autorização para MediaProjection. Frames existem apenas em RAM durante OCR local e são descartados. Nenhum screenshot, vídeo ou texto reconhecido é salvo ou enviado.") },
+                text = { Text("O Android pedirá autorização para MediaProjection. Frames existem apenas em RAM durante o OCR e são descartados. A tradução roda localmente; apenas os modelos de idioma podem ser baixados da internet quando necessário.") },
                 confirmButton = { Button(onClick = { showPrivacyDialog = false; requestProjection() }) { Text("Continuar") } },
                 dismissButton = { TextButton(onClick = { showPrivacyDialog = false }) { Text("Cancelar") } }
             )
@@ -158,10 +157,7 @@ class SafeMainActivity : ComponentActivity() {
             Button(onClick = { expanded = true }) { Text(selected.label) }
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 SourceLanguage.entries.forEach { language ->
-                    DropdownMenuItem(
-                        text = { Text(language.label) },
-                        onClick = { expanded = false; onSelected(language) }
-                    )
+                    DropdownMenuItem(text = { Text(language.label) }, onClick = { expanded = false; onSelected(language) })
                 }
             }
         }
