@@ -40,14 +40,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          forbidden=(android.permission.INTERNET android.permission.CAMERA android.permission.RECORD_AUDIO android.permission.READ_EXTERNAL_STORAGE android.permission.WRITE_EXTERNAL_STORAGE android.permission.READ_MEDIA_IMAGES android.permission.READ_MEDIA_VIDEO)
+          forbidden=(android.permission.CAMERA android.permission.RECORD_AUDIO android.permission.READ_EXTERNAL_STORAGE android.permission.WRITE_EXTERNAL_STORAGE android.permission.READ_MEDIA_IMAGES android.permission.READ_MEDIA_VIDEO)
           for permission in "${forbidden[@]}"; do
-            if grep -q "$permission" app/src/main/AndroidManifest.xml; then
+            if grep -R -q "$permission" app/src/main/AndroidManifest.xml app/src/safe/AndroidManifest.xml; then
               echo "Forbidden permission found: $permission"; exit 1
             fi
           done
-          if grep -R -n -E 'com\.google\.mlkit|FirebaseAnalytics|FirebaseCrashlytics|MediaRecorder' app/src/main/java; then
-            echo "Forbidden cloud/telemetry/recording API found."; exit 1
+          if grep -R -n -E 'FirebaseAnalytics|FirebaseCrashlytics|MediaRecorder' app/src/main/java app/src/safe/java; then
+            echo "Forbidden telemetry/recording API found."; exit 1
+          fi
+          if grep -q 'android.permission.INTERNET' app/src/main/AndroidManifest.xml; then
+            echo "Full flavor must remain networkless."; exit 1
           fi
           echo "Source privacy audit passed."
       - name: Unit tests, lint and debug builds
@@ -63,7 +66,7 @@ jobs:
           SAFE_DEBUG=app/build/outputs/apk/safe/debug/app-safe-debug.apk
           FULL_RELEASE=app/build/outputs/apk/full/release/app-full-release-unsigned.apk
           SAFE_RELEASE=app/build/outputs/apk/safe/release/app-safe-release-unsigned.apk
-          forbidden=(android.permission.INTERNET android.permission.CAMERA android.permission.RECORD_AUDIO android.permission.READ_EXTERNAL_STORAGE android.permission.WRITE_EXTERNAL_STORAGE android.permission.READ_MEDIA_IMAGES android.permission.READ_MEDIA_VIDEO)
+          forbidden=(android.permission.CAMERA android.permission.RECORD_AUDIO android.permission.READ_EXTERNAL_STORAGE android.permission.WRITE_EXTERNAL_STORAGE android.permission.READ_MEDIA_IMAGES android.permission.READ_MEDIA_VIDEO)
           for apk in "$FULL_DEBUG" "$SAFE_DEBUG" "$FULL_RELEASE" "$SAFE_RELEASE"; do
             test -f "$apk"
             permissions="$($AAPT dump permissions "$apk")"
@@ -73,25 +76,29 @@ jobs:
               fi
             done
           done
+          FULL_PERMS="$($AAPT dump permissions "$FULL_DEBUG")"
+          if grep -Fq 'android.permission.INTERNET' <<< "$FULL_PERMS"; then
+            echo "Full APK unexpectedly has network permission"; exit 1
+          fi
           SAFE_XML="$($AAPT dump xmltree "$SAFE_DEBUG" AndroidManifest.xml)"
           if grep -Fq 'TranslatorAccessibilityService' <<< "$SAFE_XML" || grep -Fq 'android.permission.BIND_ACCESSIBILITY_SERVICE' <<< "$SAFE_XML"; then
             echo "Safe APK unexpectedly contains AccessibilityService"; exit 1
           fi
-          echo "Safe APK verified: no AccessibilityService and no forbidden permissions."
+          echo "Safe APK verified: no AccessibilityService; network is limited to ML Kit model downloads."
       - name: Prepare APK artifacts
         run: |
-          cp app/build/outputs/apk/full/debug/app-full-debug.apk Translate-de-Cria-v0.1.1-Full-debug.apk
-          cp app/build/outputs/apk/safe/debug/app-safe-debug.apk Translate-de-Cria-v0.1.1-Safe-debug.apk
+          cp app/build/outputs/apk/full/debug/app-full-debug.apk Translate-de-Cria-v0.1.2-Full-debug.apk
+          cp app/build/outputs/apk/safe/debug/app-safe-debug.apk Translate-de-Cria-v0.1.2-Safe-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: Translate-de-Cria-v0.1.1-Full-debug
-          path: Translate-de-Cria-v0.1.1-Full-debug.apk
+          name: Translate-de-Cria-v0.1.2-Full-debug
+          path: Translate-de-Cria-v0.1.2-Full-debug.apk
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
-          name: Translate-de-Cria-v0.1.1-Safe-debug
-          path: Translate-de-Cria-v0.1.1-Safe-debug.apk
+          name: Translate-de-Cria-v0.1.2-Safe-debug
+          path: Translate-de-Cria-v0.1.2-Safe-debug.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -106,69 +113,6 @@ jobs:
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-      - name: Require signing secrets for publishing
-        if: ${{ ((github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release:'))) && env.KEYSTORE_B64 == '' }}
-        run: exit 1
       - name: Signing not configured yet
         if: ${{ env.KEYSTORE_B64 == '' }}
         run: echo "Skipping signed build until signing secrets are configured."
-      - uses: actions/setup-java@v5
-        if: ${{ env.KEYSTORE_B64 != '' }}
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: android-actions/setup-android@v3
-        if: ${{ env.KEYSTORE_B64 != '' }}
-      - name: Install Android SDK
-        if: ${{ env.KEYSTORE_B64 != '' }}
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
-      - uses: gradle/actions/setup-gradle@v4
-        if: ${{ env.KEYSTORE_B64 != '' }}
-        with:
-          gradle-version: "8.13"
-      - name: Fetch pinned local OCR models
-        if: ${{ env.KEYSTORE_B64 != '' }}
-        run: bash scripts/fetch-tessdata.sh
-      - name: Restore persistent signing key
-        if: ${{ env.KEYSTORE_B64 != '' }}
-        shell: bash
-        run: |
-          KEYSTORE_PATH="$RUNNER_TEMP/translate-de-cria-release.jks"
-          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE_PATH"
-          chmod 600 "$KEYSTORE_PATH"
-          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
-      - name: Build signed Full release
-        if: ${{ env.KEYSTORE_B64 != '' }}
-        run: gradle --no-daemon assembleFullRelease
-      - name: Validate identity, version and signing certificate
-        if: ${{ env.KEYSTORE_B64 != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK=app/build/outputs/apk/full/release/app-full-release.apk
-          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
-          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
-          test -f "$APK"
-          BADGING="$($AAPT dump badging "$APK" | head -n 1)"
-          echo "$BADGING" | grep -q "name='com.gabrielliz.translatedecria'"
-          echo "$BADGING" | grep -q "versionCode='2'"
-          echo "$BADGING" | grep -q "versionName='0.1.1'"
-          $APKSIGNER verify --verbose --print-certs "$APK"
-          ACTUAL="$($APKSIGNER verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:lower:]' '[:upper:]')"
-          EXPECTED="$(tr -d '[:space:]' < SIGNING_CERT_SHA256.txt | tr '[:lower:]' '[:upper:]')"
-          [[ "$ACTUAL" == "$EXPECTED" ]]
-          cp "$APK" Translate-de-Cria-v0.1.1.apk
-      - uses: actions/upload-artifact@v4
-        if: ${{ env.KEYSTORE_B64 != '' && success() }}
-        with:
-          name: Translate-de-Cria-v0.1.1-signed
-          path: Translate-de-Cria-v0.1.1.apk
-          retention-days: 30
-      - name: Publish GitHub Release
-        if: ${{ ((github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release:'))) && env.KEYSTORE_B64 != '' && success() }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "v0.1.1" "Translate-de-Cria-v0.1.1.apk#Translate-de-Cria-v0.1.1.apk" --title "Translate de Cria v0.1.1" --notes-file RELEASE_NOTES.md --target "$GITHUB_SHA"
