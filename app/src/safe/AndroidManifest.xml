@@ -2,7 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <application android:label="Translate de Cria Safe">
+    <application
+        android:label="Translate de Cria Safe"
+        tools:replace="android:label">
         <activity
             android:name=".MainActivity"
             tools:node="remove" />
