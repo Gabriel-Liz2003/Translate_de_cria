@@ -105,7 +105,7 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
-    implementation("com.google.mlkit:translate:17.0.3")
+    "safeImplementation"("com.google.mlkit:translate:17.0.3")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
