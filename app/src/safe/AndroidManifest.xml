@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application android:label="Translate de Cria Safe">
+        <activity
+            android:name=".MainActivity"
+            tools:node="remove" />
+
+        <service
+            android:name=".accessibility.TranslatorAccessibilityService"
+            tools:node="remove" />
+
+        <activity
+            android:name=".SafeMainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
