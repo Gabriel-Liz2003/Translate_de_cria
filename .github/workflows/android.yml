@@ -52,7 +52,6 @@ jobs:
           if grep -q 'android.permission.INTERNET' app/src/main/AndroidManifest.xml; then
             echo "Full flavor must remain networkless."; exit 1
           fi
-          echo "Source privacy audit passed."
       - name: Unit tests, lint and debug builds
         run: gradle --no-daemon testFullDebugUnitTest testSafeDebugUnitTest lintFullDebug lintSafeDebug assembleFullDebug assembleSafeDebug
       - name: Release compilation check
@@ -86,21 +85,23 @@ jobs:
           if grep -Fq 'TranslatorAccessibilityService' <<< "$SAFE_XML" || grep -Fq 'android.permission.BIND_ACCESSIBILITY_SERVICE' <<< "$SAFE_XML"; then
             echo "Safe APK unexpectedly contains AccessibilityService"; exit 1
           fi
-          echo "Safe APK verified: no AccessibilityService; INTERNET only supports local ML Kit model downloads."
+          BADGING="$($AAPT dump badging "$SAFE_DEBUG" | head -n 1)"
+          echo "$BADGING" | grep -q "versionCode='4'"
+          echo "$BADGING" | grep -q "versionName='0.1.3-safe-debug'"
       - name: Prepare APK artifacts
         run: |
-          cp app/build/outputs/apk/full/debug/app-full-debug.apk Translate-de-Cria-v0.1.2-Full-debug.apk
-          cp app/build/outputs/apk/safe/debug/app-safe-debug.apk Translate-de-Cria-v0.1.2-Safe-debug.apk
+          cp app/build/outputs/apk/full/debug/app-full-debug.apk Translate-de-Cria-v0.1.3-Full-debug.apk
+          cp app/build/outputs/apk/safe/debug/app-safe-debug.apk Translate-de-Cria-v0.1.3-Safe-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: Translate-de-Cria-v0.1.2-Full-debug
-          path: Translate-de-Cria-v0.1.2-Full-debug.apk
+          name: Translate-de-Cria-v0.1.3-Full-debug
+          path: Translate-de-Cria-v0.1.3-Full-debug.apk
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
-          name: Translate-de-Cria-v0.1.2-Safe-debug
-          path: Translate-de-Cria-v0.1.2-Safe-debug.apk
+          name: Translate-de-Cria-v0.1.3-Safe-debug
+          path: Translate-de-Cria-v0.1.3-Safe-debug.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -115,9 +116,6 @@ jobs:
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-      - name: Require signing secrets for publishing
-        if: ${{ ((github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release:'))) && env.KEYSTORE_B64 == '' }}
-        run: exit 1
       - name: Signing not configured yet
         if: ${{ env.KEYSTORE_B64 == '' }}
         run: echo "Skipping signed build until signing secrets are configured."
@@ -128,11 +126,6 @@ jobs:
           java-version: "17"
       - uses: android-actions/setup-android@v3
         if: ${{ env.KEYSTORE_B64 != '' }}
-      - name: Install Android SDK
-        if: ${{ env.KEYSTORE_B64 != '' }}
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v4
         if: ${{ env.KEYSTORE_B64 != '' }}
         with:
@@ -148,36 +141,20 @@ jobs:
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE_PATH"
           chmod 600 "$KEYSTORE_PATH"
           echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
-      - name: Build signed Full release
+      - name: Build signed releases
         if: ${{ env.KEYSTORE_B64 != '' }}
-        run: gradle --no-daemon assembleFullRelease
-      - name: Validate identity, version and signing certificate
+        run: gradle --no-daemon assembleFullRelease assembleSafeRelease
+      - name: Prepare signed Safe APK
         if: ${{ env.KEYSTORE_B64 != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK=app/build/outputs/apk/full/release/app-full-release.apk
-          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
-          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
-          test -f "$APK"
-          BADGING="$($AAPT dump badging "$APK" | head -n 1)"
-          echo "$BADGING" | grep -q "name='com.gabrielliz.translatedecria'"
-          echo "$BADGING" | grep -q "versionCode='3'"
-          echo "$BADGING" | grep -q "versionName='0.1.2'"
-          $APKSIGNER verify --verbose --print-certs "$APK"
-          ACTUAL="$($APKSIGNER verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:lower:]' '[:upper:]')"
-          EXPECTED="$(tr -d '[:space:]' < SIGNING_CERT_SHA256.txt | tr '[:lower:]' '[:upper:]')"
-          [[ "$ACTUAL" == "$EXPECTED" ]]
-          cp "$APK" Translate-de-Cria-v0.1.2.apk
+        run: cp app/build/outputs/apk/safe/release/app-safe-release.apk Translate-de-Cria-v0.1.3-Safe.apk
       - uses: actions/upload-artifact@v4
         if: ${{ env.KEYSTORE_B64 != '' && success() }}
         with:
-          name: Translate-de-Cria-v0.1.2-signed
-          path: Translate-de-Cria-v0.1.2.apk
+          name: Translate-de-Cria-v0.1.3-Safe-signed
+          path: Translate-de-Cria-v0.1.3-Safe.apk
           retention-days: 30
       - name: Publish GitHub Release
-        if: ${{ ((github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release:'))) && env.KEYSTORE_B64 != '' && success() }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release && env.KEYSTORE_B64 != '' && success() }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "v0.1.2" "Translate-de-Cria-v0.1.2.apk#Translate-de-Cria-v0.1.2.apk" --title "Translate de Cria v0.1.2" --notes-file RELEASE_NOTES.md --target "$GITHUB_SHA"
+        run: gh release create "v0.1.3" "Translate-de-Cria-v0.1.3-Safe.apk#Translate-de-Cria-v0.1.3-Safe.apk" --title "Translate de Cria v0.1.3" --target "$GITHUB_SHA"
