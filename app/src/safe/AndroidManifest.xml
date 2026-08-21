@@ -13,6 +13,13 @@
             android:name=".accessibility.TranslatorAccessibilityService"
             tools:node="remove" />
 
+        <service
+            android:name=".ocr.ScreenOcrService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection"
+            android:stopWithTask="false"
+            tools:replace="android:foregroundServiceType" />
+
         <activity
             android:name=".SafeMainActivity"
             android:exported="true"
