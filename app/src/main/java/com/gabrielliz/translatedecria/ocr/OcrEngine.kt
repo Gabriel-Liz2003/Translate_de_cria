@@ -20,11 +20,9 @@ class OcrEngine(context: Context) : Closeable {
 
         return try {
             tess.setImage(bitmap)
-            // Recognition is triggered here. No recognized text is persisted or logged.
             tess.getUTF8Text()
             extractTextLines(sourceLanguage)
         } finally {
-            // Drops Tesseract recognition results and its native copy of the current image.
             tess.clear()
         }
     }
@@ -51,9 +49,15 @@ class OcrEngine(context: Context) : Closeable {
                 val confidence = iterator.confidence(level)
                 val bounds = runCatching { iterator.getBoundingRect(level) }.getOrNull()
 
-                if (text.length >= 2 && confidence >= MIN_CONFIDENCE && bounds != null && isUsable(bounds)) {
+                if (
+                    bounds != null &&
+                    confidence >= MIN_CONFIDENCE &&
+                    isUsable(bounds) &&
+                    isMeaningfulText(text) &&
+                    matchesRequestedLanguage(text, sourceLanguage)
+                ) {
                     val hint = sourceLanguage.languageTag ?: LanguageHeuristics.detect(text)
-                    blocks += ScreenTextBlock(text, Rect(bounds), hint)
+                    if (hint != null) blocks += ScreenTextBlock(text, Rect(bounds), hint)
                 }
 
                 if (!iterator.next(level)) break
@@ -63,6 +67,44 @@ class OcrEngine(context: Context) : Closeable {
         }
 
         return deduplicate(blocks)
+    }
+
+    private fun matchesRequestedLanguage(text: String, sourceLanguage: SourceLanguage): Boolean {
+        if (sourceLanguage == SourceLanguage.AUTO) return LanguageHeuristics.detect(text) != null
+
+        var latin = 0
+        var kana = 0
+        var han = 0
+        var hangul = 0
+        text.codePoints().forEach { codePoint ->
+            when {
+                codePoint in 0x0041..0x005A || codePoint in 0x0061..0x007A -> latin++
+                codePoint in 0x3040..0x30FF || codePoint in 0x31F0..0x31FF -> kana++
+                codePoint in 0x3400..0x4DBF || codePoint in 0x4E00..0x9FFF -> han++
+                codePoint in 0xAC00..0xD7AF || codePoint in 0x1100..0x11FF -> hangul++
+            }
+        }
+
+        return when (sourceLanguage) {
+            SourceLanguage.AUTO -> true
+            SourceLanguage.ENGLISH -> latin >= 2
+            SourceLanguage.JAPANESE -> kana >= 1 || han >= 2
+            SourceLanguage.CHINESE -> han >= 1 && kana == 0
+            SourceLanguage.KOREAN -> hangul >= 1
+        }
+    }
+
+    private fun isMeaningfulText(text: String): Boolean {
+        if (text.length < 2) return false
+        val meaningful = text.codePoints().filter { cp ->
+            Character.isLetterOrDigit(cp) ||
+                cp in 0x3040..0x30FF ||
+                cp in 0x31F0..0x31FF ||
+                cp in 0x3400..0x4DBF ||
+                cp in 0x4E00..0x9FFF ||
+                cp in 0xAC00..0xD7AF
+        }.count()
+        return meaningful >= 2
     }
 
     private fun deduplicate(blocks: List<ScreenTextBlock>): List<ScreenTextBlock> {
@@ -85,7 +127,8 @@ class OcrEngine(context: Context) : Closeable {
         SourceLanguage.KOREAN -> "kor"
     }
 
-    private fun isUsable(bounds: Rect): Boolean = bounds.width() >= 4 && bounds.height() >= 4
+    private fun isUsable(bounds: Rect): Boolean =
+        bounds.width() >= MIN_BOX_SIZE_PX && bounds.height() >= MIN_BOX_SIZE_PX
 
     private fun normalize(text: String): String = text.lowercase().replace(Regex("\\s+"), " ").trim()
 
@@ -103,6 +146,7 @@ class OcrEngine(context: Context) : Closeable {
     }
 
     private companion object {
-        const val MIN_CONFIDENCE = 35f
+        const val MIN_CONFIDENCE = 45f
+        const val MIN_BOX_SIZE_PX = 10
     }
 }
