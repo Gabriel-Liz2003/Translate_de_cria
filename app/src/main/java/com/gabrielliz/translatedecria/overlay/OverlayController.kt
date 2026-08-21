@@ -15,6 +15,7 @@ import android.widget.TextView
 import com.gabrielliz.translatedecria.model.CaptureMode
 import com.gabrielliz.translatedecria.model.SettingsSnapshot
 import com.gabrielliz.translatedecria.model.TranslatedBlock
+import kotlin.math.max
 import kotlin.math.min
 
 class OverlayController(
@@ -80,19 +81,17 @@ class OverlayController(
         }
 
         val metrics = appContext.resources.displayMetrics
-        val placements = OverlayLayoutEngine.resolve(
-            bounds = blocks.map { OverlayLayoutEngine.Box(it.bounds.left, it.bounds.top, it.bounds.right, it.bounds.bottom) },
-            screenWidth = metrics.widthPixels,
-            screenHeight = metrics.heightPixels,
-            gapPx = dp(4),
-            preferAdjacent = settings.captureMode == CaptureMode.OCR
-        )
-        renderedTranslationBounds = placements.map { placement ->
-            placement.placed.let { Rect(it.left, it.top, it.right, it.bottom) }
-        }
+        val screenWidth = metrics.widthPixels
+        val screenHeight = metrics.heightPixels
+        val rendered = mutableListOf<Rect>()
 
-        blocks.zip(placements).forEach { (block, placement) ->
-            val rect = placement.placed
+        blocks.forEach { block ->
+            val source = block.bounds
+            val minWidth = dp(120)
+            val desiredWidth = max(source.width(), minWidth).coerceAtMost(screenWidth)
+            val left = source.left.coerceIn(0, (screenWidth - desiredWidth).coerceAtLeast(0))
+            val top = source.top.coerceIn(0, (screenHeight - dp(32)).coerceAtLeast(0))
+
             val textView = TextView(appContext).apply {
                 text = if (settings.showOriginal) {
                     "${block.originalText}\n${block.translatedText}"
@@ -100,21 +99,27 @@ class OverlayController(
                     block.translatedText
                 }
                 setTextColor(Color.WHITE)
-                textSize = min(settings.fontSizeSp, (rect.height / metrics.density * 0.60f).coerceAtLeast(11f))
+                textSize = min(settings.fontSizeSp, (source.height() / metrics.density * 0.72f).coerceIn(11f, 18f))
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(5), dp(3), dp(5), dp(3))
+                setPadding(dp(6), dp(3), dp(6), dp(3))
                 background = roundedBackground(
-                    Color.argb((settings.overlayOpacity * 235).toInt().coerceIn(70, 235), 14, 14, 18),
-                    dp(5).toFloat()
+                    Color.argb((settings.overlayOpacity * 245).toInt().coerceIn(150, 245), 16, 16, 20),
+                    dp(4).toFloat()
                 )
-                maxLines = 6
+                maxLines = 3
             }
 
-            val params = FrameLayout.LayoutParams(rect.width, FrameLayout.LayoutParams.WRAP_CONTENT).apply {
-                leftMargin = rect.left
-                topMargin = rect.top
+            val params = FrameLayout.LayoutParams(desiredWidth, FrameLayout.LayoutParams.WRAP_CONTENT).apply {
+                leftMargin = left
+                topMargin = top
             }
             layer.addView(textView, params)
+            textView.post {
+                if (!textView.isAttachedToWindow) return@post
+                val bottom = (top + textView.height).coerceAtMost(screenHeight)
+                rendered += Rect(left, top, left + desiredWidth, bottom)
+                renderedTranslationBounds = rendered.map(::Rect)
+            }
         }
     }
 
