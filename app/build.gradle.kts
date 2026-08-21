@@ -20,6 +20,20 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    flavorDimensions += "edition"
+    productFlavors {
+        create("full") {
+            dimension = "edition"
+            buildConfigField("boolean", "HAS_ACCESSIBILITY", "true")
+        }
+        create("safe") {
+            dimension = "edition"
+            applicationIdSuffix = ".safe"
+            versionNameSuffix = "-safe"
+            buildConfigField("boolean", "HAS_ACCESSIBILITY", "false")
+        }
+    }
+
     signingConfigs {
         create("release") {
             val storePath = System.getenv("ANDROID_KEYSTORE_PATH")
